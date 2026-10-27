@@ -344,7 +344,7 @@ async def agent_chat(
         if tool_name == "list_departments":
             tool_result: Any = await ords_client.list_departments()
         else:
-            tool_result = await ords_client.department_summary(normalized_arguments["department_code"])
+            tool_result = await ords_client.department_summary(normalized_arguments["department_code"], gateway_request_id=request_id)
     except (ORDSOAuthError, ORDSAPIError) as exc:
         _append_audit(
             store,

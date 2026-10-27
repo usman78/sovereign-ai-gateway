@@ -16,11 +16,6 @@ import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-try:
-    from dotenv import load_dotenv
-except ImportError:  # .env loading is optional when environment variables are set directly.
-    load_dotenv = None
-
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/oracle", tags=["Oracle APEX / ORDS"])
 
@@ -37,9 +32,6 @@ class ORDSSettings:
 
     @classmethod
     def from_env(cls) -> "ORDSSettings":
-        if load_dotenv is not None:
-            load_dotenv(override=False)
-
         enabled = os.getenv("ORDS_ENABLED", "false").strip().lower() in {
             "1", "true", "yes", "on"
         }
@@ -117,16 +109,7 @@ class ORDSAPIError(RuntimeError):
 
 
 class ORDSOAuthError(RuntimeError):
-    def __init__(
-        self,
-        message: str,
-        *,
-        code: str = "ords_oauth_failed",
-        status_code: int = 502,
-    ) -> None:
-        super().__init__(message)
-        self.code = code
-        self.status_code = status_code
+    pass
 
 
 class ORDSClient:
@@ -148,29 +131,22 @@ class ORDSClient:
         self._expires_at = 0.0
         self._token_lock = asyncio.Lock()
 
-
     def _client(self, timeout: float | None = None) -> httpx.AsyncClient:
         return httpx.AsyncClient(
-            timeout=httpx.Timeout(
-                timeout or self.settings.timeout_seconds,
-                connect=10.0
-            ),
+            timeout=httpx.Timeout(timeout or self.settings.timeout_seconds, connect=10.0),
             follow_redirects=False,
             trust_env=False,
             transport=self._transport,
-
-            # Identify our application to the ORDS endpoint.
             headers={
                 "Accept": "application/json",
                 "User-Agent": "SovereignAIGateway/0.1",
             },
         )
 
-
     async def _fetch_token(self) -> tuple[str, float]:
         token_url = f"{self.settings.base_url}/oauth/token"
         try:
-            async with self._client() as client:
+            async with self._client(timeout=25.0) as client:
                 response = await client.post(
                     token_url,
                     auth=(self.settings.client_id, self.settings.client_secret),
@@ -185,13 +161,6 @@ class ORDSClient:
             logger.error("ORDS OAuth token request failed: HTTP %s", exc.response.status_code)
             raise ORDSOAuthError(
                 f"ORDS OAuth token endpoint returned HTTP {exc.response.status_code}"
-            ) from exc
-        except httpx.TimeoutException as exc:
-            logger.warning("ORDS OAuth token request timed out")
-            raise ORDSOAuthError(
-                "ORDS OAuth token request timed out",
-                code="ords_oauth_timeout",
-                status_code=504,
             ) from exc
         except (httpx.RequestError, ValueError) as exc:
             logger.exception("ORDS OAuth token request could not be completed")
@@ -296,11 +265,44 @@ class ORDSClient:
             cleaned.append({field: lowered.get(field) for field in allowed_fields})
         return cleaned
 
-    async def department_summary(self, department_code: str) -> dict[str, Any]:
+    async def list_audit_events(self) -> list[dict[str, Any]]:
+        """Read the latest Oracle-side audit events through a protected, fixed ORDS endpoint."""
+        payload = await self._request("GET", "ai-gateway/audit/")
+        items = payload.get("items")
+        if not isinstance(items, list):
+            raise ORDSAPIError(502, "ords_audit_list_shape_invalid")
+
+        allowed_fields = (
+            "event_id",
+            "gateway_request_id",
+            "occurred_at",
+            "operation_name",
+            "department_code",
+            "actor",
+            "outcome",
+            "details",
+        )
+        cleaned: list[dict[str, Any]] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            lowered = {str(key).lower(): value for key, value in item.items()}
+            cleaned.append({field: lowered.get(field) for field in allowed_fields})
+        return cleaned
+
+    async def department_summary(
+        self,
+        department_code: str,
+        *,
+        gateway_request_id: str | None = None,
+    ) -> dict[str, Any]:
+        request_body: dict[str, Any] = {"department_code": department_code}
+        if gateway_request_id:
+            request_body["gateway_request_id"] = gateway_request_id
         payload = await self._request(
             "POST",
             "ai-gateway/department-summary/",
-            json_body={"department_code": department_code},
+            json_body=request_body,
         )
         # ORDS PL/SQL OUT parameters normally appear as top-level JSON properties.
         # Accept a single-item collection too, to tolerate ORDS response variations.
@@ -379,10 +381,10 @@ def _audit_after(store: Any, event_type: str, actor: str, request_id: str, detai
 
 def _map_ords_error(exc: Exception, request_id: str) -> HTTPException:
     if isinstance(exc, ORDSOAuthError):
-        logger.error("ORDS OAuth authentication failed: %s", exc.code)
+        logger.error("ORDS OAuth authentication failed: %s", str(exc))
         return HTTPException(
-            status_code=exc.status_code,
-            detail={"code": exc.code, "request_id": request_id},
+            status_code=502,
+            detail={"code": "ords_oauth_failed", "request_id": request_id},
         )
     if isinstance(exc, ORDSAPIError):
         if exc.status_code == 404:
@@ -525,7 +527,7 @@ async def ords_department_summary(
         },
     )
     try:
-        result = await client.department_summary(department_code)
+        result = await client.department_summary(department_code, gateway_request_id=request_id)
         digest = hashlib.sha256(
             json.dumps(result, sort_keys=True, default=str).encode("utf-8")
         ).hexdigest()

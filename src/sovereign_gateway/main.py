@@ -6,6 +6,7 @@ import time
 # from .oracle_api import router as oracle_router
 from .ords_api import router as ords_router
 from .agent_api import router as agent_router
+from .dashboard_api import router as dashboard_router
 import uuid
 from typing import Literal
 
@@ -67,6 +68,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # app.include_router(oracle_router)
     app.include_router(ords_router)
     app.include_router(agent_router)
+    app.include_router(dashboard_router)
     
     async def require_client(
         x_api_key: str | None = Header(default=None),
