@@ -1,0 +1,53 @@
+flowchart LR
+    U[User / Client Application] -->|POST /v1/agent/chat<br/>X-API-Key| API[FastAPI Gateway]
+
+    subgraph LOCAL[Local machine — Python Gateway + Ollama]
+      API --> POLICY{Prompt policy}
+      POLICY -->|Block: detected sensitive pattern| BLOCK[HTTP 403<br/>No model or Oracle call]
+      POLICY -->|Redact / forward| GEMMA[Ollama — Gemma 4<br/>Local inference + tool selection]
+      GEMMA -->|Native tool call| GATE[Tool allowlist + schema validation<br/>One operation per request]
+      GATE --> ORDSCLIENT[ORDS client<br/>OAuth token cache + HTTPS]
+      API -.-> SQLITE[(SQLite audit store<br/>HMAC fingerprints + SHA-256 chain)]
+      POLICY -.-> SQLITE
+      GATE -.-> SQLITE
+      ORDSCLIENT -.-> SQLITE
+      DASH[Read-only monitoring dashboard<br/>X-Admin-Key] --> SQLITE
+    end
+
+    subgraph ORACLE[Oracle-hosted APEX / ORDS demonstration environment]
+      TOKEN[ORDS OAuth token endpoint]
+      REST[Protected REST module<br/>GET departments<br/>POST department summary<br/>GET audit feed]
+      PKG[AI_GATEWAY_API<br/>Approved read-only PL/SQL operation]
+      DATA[(AI_DEPARTMENTS<br/>Synthetic demo rows)]
+      DBAUDIT[(AI_GATEWAY_AUDIT<br/>Summary operation audit)]
+      TOKEN -->|Bearer token| REST
+      REST -->|POST summary| PKG
+      REST -->|GET list| DATA
+      PKG -->|SELECT| DATA
+      PKG -.->|Autonomous audit record<br/>request ID + outcome| DBAUDIT
+    end
+
+    ORDSCLIENT -->|1. Client credentials<br/>Basic Auth + form grant| TOKEN
+    ORDSCLIENT -->|2. Bearer-authenticated API call| REST
+    REST -->|Department data / audit rows| ORDSCLIENT
+    ORDSCLIENT -->|Tool result| GEMMA
+    GEMMA -->|Grounded answer| API
+    API -->|JSON response| U
+    DASH -->|OAuth-protected audit feed| REST
+
+    classDef user fill:#e9f2ff,stroke:#3974b8,color:#12314f,stroke-width:1.5px;
+    classDef gateway fill:#e7f8f3,stroke:#16876b,color:#123e35,stroke-width:1.5px;
+    classDef ai fill:#efeaff,stroke:#7357bd,color:#30215c,stroke-width:1.5px;
+    classDef security fill:#fff4dc,stroke:#bd8622,color:#573a08,stroke-width:1.5px;
+    classDef blocked fill:#ffe9e9,stroke:#c44b4b,color:#6c1c1c,stroke-width:1.5px;
+    classDef db fill:#eaf1f7,stroke:#54718a,color:#1d3447,stroke-width:1.5px;
+
+    class U user;
+    class API,ORDSCLIENT,DASH gateway;
+    class GEMMA ai;
+    class POLICY,GATE security;
+    class BLOCK blocked;
+    class TOKEN,REST,PKG,DATA,DBAUDIT,SQLITE db;
+
+    style LOCAL fill:#f2fbf8,stroke:#16876b,stroke-width:2px
+    style ORACLE fill:#f4f7fb,stroke:#54718a,stroke-width:2px

@@ -1,0 +1,43 @@
+sequenceDiagram
+    autonumber
+    actor User
+    participant API as FastAPI Gateway
+    participant Policy as Prompt Policy
+    participant LLM as Ollama / Gemma 4
+    participant Gate as Tool Validator
+    participant OAuth as ORDS OAuth
+    participant ORDS as ORDS REST API
+    participant PL as AI_GATEWAY_API
+    participant DB as Oracle Demo Schema
+    participant Audit as SQLite Audit Store
+
+    User->>API: POST /v1/agent/chat (X-API-Key)
+    API->>Policy: Inspect prompt; detect patterns
+    Policy->>Audit: agent.requested / blocked event
+    alt Sensitive data + block policy
+        Policy-->>User: HTTP 403; no LLM or ORDS request
+    else Redact or no findings
+        Policy->>LLM: Sanitized prompt + fixed tool definitions
+        LLM-->>API: Native tool call (name + JSON arguments)
+        API->>Gate: Validate allowlisted tool + arguments
+        Gate->>Audit: agent.tool.requested
+        API->>OAuth: POST /oauth/token (client credentials)
+        OAuth-->>API: Bearer token (cached in process)
+        API->>ORDS: Approved endpoint + Bearer token
+        alt list_departments
+            ORDS->>DB: Fixed read-only collection query
+            DB-->>ORDS: Synthetic department rows
+        else department_summary
+            ORDS->>PL: Invoke approved PL/SQL procedure
+            PL->>DB: SELECT one approved department
+            DB-->>PL: Department values
+            PL->>DB: Write AI_GATEWAY_AUDIT row with request ID
+            PL-->>ORDS: Summary JSON
+        end
+        ORDS-->>API: JSON tool result
+        API->>Audit: agent.tool.succeeded (result digest)
+        API->>LLM: Tool result; tools disabled on final turn
+        LLM-->>API: Natural-language answer
+        API->>Audit: agent.completed
+        API-->>User: Answer + structured source data + request ID
+    end

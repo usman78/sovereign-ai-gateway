@@ -1,0 +1,63 @@
+digraph SovereignAIGateway {
+  graph [rankdir=TB, bgcolor="#0b1220", pad="0.35", nodesep="0.32", ranksep="0.42", splines=polyline, compound=true, fontname="Arial", fontsize=22, fontcolor="#f8fafc", label="SOVEREIGN AI GATEWAY\nLOCAL INFERENCE  •  CONTROLLED ORACLE ACCESS  •  AUDIT VISIBILITY", labelloc=t, labeljust=c];
+  node [shape=box, style="rounded,filled", fontname="Arial", fontsize=11, margin="0.20,0.12", color="#334155", penwidth=1.5, fillcolor="#172338", fontcolor="#e5edf8", width=3.8];
+  edge [fontname="Arial", fontsize=9, color="#93a4ba", fontcolor="#cbd5e1", penwidth=1.4, arrowsize=0.75];
+
+  user [label=<<B>User / Client</B><BR/><FONT POINT-SIZE="9">Natural-language request • X-API-Key</FONT>>, fillcolor="#18304c", color="#5b9bd5"];
+
+  subgraph cluster_local {
+    label="LOCAL MACHINE  |  PYTHON GATEWAY + OLLAMA";
+    labelloc=t; fontsize=14; fontcolor="#8ce5c5"; color="#16876b"; penwidth=2; style="rounded,filled"; fillcolor="#0f1d2b";
+
+    api [label=<<B>FastAPI agent endpoint</B><BR/><FONT POINT-SIZE="9">POST /v1/agent/chat</FONT>>, fillcolor="#123b37", color="#36c69a"];
+    policy [label=<<B>Prompt inspection and policy</B><BR/><FONT POINT-SIZE="9">Pattern checks • redact / block / forward</FONT>>, fillcolor="#463517", color="#e5ad46", fontcolor="#fff0c2"];
+    blocked [label=<<B>BLOCKED</B><BR/><FONT POINT-SIZE="9">HTTP 403 • no model or Oracle call</FONT>>, fillcolor="#4b2028", color="#e87979", fontcolor="#ffe4e6", width=3.2];
+    gemma [label=<<B>Ollama • Gemma 4</B><BR/><FONT POINT-SIZE="9">Local inference • native tool selection</FONT>>, fillcolor="#2b2450", color="#a78bfa"];
+    gate [label=<<B>Tool authorization gate</B><BR/><FONT POINT-SIZE="9">Fixed allowlist • strict arguments • one tool call</FONT>>, fillcolor="#463517", color="#e5ad46", fontcolor="#fff0c2"];
+    client [label=<<B>ORDS client</B><BR/><FONT POINT-SIZE="9">OAuth client credentials • cached bearer token</FONT><BR/><FONT POINT-SIZE="9">HTTPS • explicit User-Agent</FONT>>, fillcolor="#123b37", color="#36c69a"];
+    sqlite [shape=cylinder, label=<<B>SQLite gateway audit</B><BR/><FONT POINT-SIZE="9">HMAC prompt fingerprints</FONT><BR/><FONT POINT-SIZE="9">SHA-256 event chain</FONT>>, fillcolor="#172f45", color="#60a5fa", width=3.3];
+
+    api -> policy;
+    policy -> blocked [label="sensitive + block", color="#e87979", fontcolor="#fca5a5", constraint=false];
+    policy -> gemma [label="sanitized / clean"];
+    gemma -> gate [label="native tool call"];
+    gate -> client [label="approved operation"];
+    api -> sqlite [style=dashed, label="request events", color="#60a5fa", constraint=false];
+    policy -> sqlite [style=dashed, label="policy outcome", color="#60a5fa", constraint=false];
+    gate -> sqlite [style=dashed, label="tool events", color="#60a5fa", constraint=false];
+    client -> sqlite [style=dashed, label="upstream outcome", color="#60a5fa", constraint=false];
+  }
+
+  subgraph cluster_oracle {
+    label="ORACLE-HOSTED APEX / ORDS DEMONSTRATION SERVICE";
+    labelloc=t; fontsize=14; fontcolor="#a8c8f3"; color="#54718a"; penwidth=2; style="rounded,filled"; fillcolor="#101c2c";
+
+    token [label=<<B>ORDS OAuth token endpoint</B><BR/><FONT POINT-SIZE="9">/oauth/token • client_credentials</FONT>>, fillcolor="#17314b", color="#60a5fa"];
+    rest [label=<<B>Protected ORDS module</B><BR/><FONT POINT-SIZE="9">GET departments • POST department summary</FONT><BR/><FONT POINT-SIZE="9">GET Oracle audit feed</FONT>>, fillcolor="#17314b", color="#60a5fa"];
+    list [label=<<B>Fixed collection query</B><BR/><FONT POINT-SIZE="9">Read-only department listing</FONT>>, fillcolor="#24354a", color="#829ab6"];
+    pkg [label=<<B>AI_GATEWAY_API</B><BR/><FONT POINT-SIZE="9">GET_DEPARTMENT_SUMMARY</FONT><BR/><FONT POINT-SIZE="9">Fixed PL/SQL operation</FONT>>, fillcolor="#173d39", color="#36c69a"];
+    table [shape=cylinder, label=<<B>AI_DEPARTMENTS</B><BR/><FONT POINT-SIZE="9">Synthetic department rows</FONT>>, fillcolor="#24354a", color="#829ab6"];
+    dbaudit [shape=cylinder, label=<<B>AI_GATEWAY_AUDIT</B><BR/><FONT POINT-SIZE="9">Summary operation + request ID</FONT>>, fillcolor="#3b2f1d", color="#e5ad46", fontcolor="#fff0c2"];
+
+    token -> rest [label="Bearer token"];
+    rest -> list [label="GET list"];
+    rest -> pkg [label="POST summary"];
+    list -> table [label="fixed SELECT"];
+    pkg -> table [label="fixed SELECT"];
+    pkg -> dbaudit [style=dashed, label="audit row", color="#e5ad46", fontcolor="#f5d58b"];
+  }
+
+  dash [label=<<B>Read-only monitoring dashboard</B><BR/><FONT POINT-SIZE="9">/admin/dashboard • X-Admin-Key</FONT><BR/><FONT POINT-SIZE="9">Gateway events + Oracle audit correlation</FONT>>, fillcolor="#123b37", color="#36c69a", width=4.6];
+  note [shape=note, label=<<B>Deployment scope</B><BR/><FONT POINT-SIZE="9">Gemma inference runs locally. The demo database / ORDS service is hosted by Oracle.</FONT><BR/><FONT POINT-SIZE="9">Synthetic data only • not an air-gapped deployment.</FONT>>, fillcolor="#2a2530", color="#b49ad4", fontcolor="#f3e8ff", width=5.0];
+
+  user -> api [label="HTTPS / local API request"];
+  client -> token [label="1. Basic Auth + form grant"];
+  client -> rest [label="2. Bearer-authenticated call", color="#36c69a", penwidth=2];
+  rest -> client [label="JSON data", style=dashed, color="#36c69a", constraint=false];
+  client -> gemma [label="tool result", style=dashed, color="#a78bfa", constraint=false];
+  gemma -> api [label="grounded answer", style=dashed, color="#a78bfa", constraint=false];
+  api -> user [label="JSON response", style=dashed, constraint=false];
+  sqlite -> dash [label="read-only event query", color="#60a5fa"];
+  dbaudit -> dash [label="read-only audit feed", style=dashed, color="#e5ad46"];
+  note -> dash [style=invis];
+}
